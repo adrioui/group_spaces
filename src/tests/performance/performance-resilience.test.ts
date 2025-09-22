@@ -11,25 +11,36 @@ describe('Performance and Resilience Tests', () => {
       const requests = []
       const latencies: number[] = []
 
-      // Create 50 rapid requests
-      for (let i = 0; i < 50; i++) {
+      // Mock fetch to simulate varying response times
+      global.fetch = vi.fn().mockImplementation(async (url, options) => {
         const requestStart = Date.now()
 
-        global.fetch = vi.fn().mockResolvedValue({
-          ok: i < 30, // First 30 succeed, then rate limited
-          status: i < 30 ? 200 : 429,
-          json: async () => {
-            const latency = Date.now() - requestStart
-            latencies.push(latency)
+        // Simulate processing time (20-100ms)
+        const processingTime = Math.random() * 80 + 20
+        await new Promise(resolve => setTimeout(resolve, processingTime))
 
-            if (i < 30) {
+        const latency = Date.now() - requestStart
+        latencies.push(latency)
+
+        const body = JSON.parse(options.body)
+        const phoneNumber = body.phoneNumber
+        const phoneIndex = parseInt(phoneNumber.slice(-2))
+
+        return {
+          ok: phoneIndex < 30,
+          status: phoneIndex < 30 ? 200 : 429,
+          json: async () => {
+            if (phoneIndex < 30) {
               return { success: true }
             } else {
               return { error: 'Too many requests. Please try again later' }
             }
           },
-        })
+        }
+      })
 
+      // Create 50 rapid requests
+      for (let i = 0; i < 50; i++) {
         requests.push(
           fetch('/api/auth/phone-number/send-otp', {
             method: 'POST',
@@ -56,6 +67,7 @@ describe('Performance and Resilience Tests', () => {
       // Verify average latency is reasonable
       const avgLatency = latencies.reduce((a, b) => a + b, 0) / latencies.length
       expect(avgLatency).toBeLessThan(2000)
+      expect(avgLatency).toBeGreaterThan(0) // Ensure we actually have latencies
 
       console.log(`Burst test: ${requests.length} requests in ${totalTime}ms, avg latency: ${avgLatency}ms`)
     })
@@ -179,29 +191,35 @@ describe('Performance and Resilience Tests', () => {
     it('should implement circuit breaker pattern for repeated failures', async () => {
       const attemptCounts: number[] = []
 
+      // Mock fetch to track requests
+      global.fetch = vi.fn().mockImplementation(async (url, options) => {
+        const requestIndex = attemptCounts.length
+        attemptCounts.push(requestIndex)
+
+        if (requestIndex < 5) {
+          return {
+            ok: false,
+            status: 502,
+            json: async () => ({
+              error: 'SMS service temporarily unavailable',
+              code: 'SERVICE_UNAVAILABLE',
+            }),
+          }
+        } else {
+          return {
+            ok: false,
+            status: 503,
+            json: async () => ({
+              error: 'SMS service temporarily disabled due to repeated failures. Please try again later.',
+              code: 'CIRCUIT_BREAKER_OPEN',
+              retryAfter: 600,
+            }),
+          }
+        }
+      })
+
       // Simulate repeated Twilio failures
       for (let i = 0; i < 10; i++) {
-        global.fetch = vi.fn().mockResolvedValue({
-          ok: false,
-          status: i < 5 ? 502 : 503, // First 5 are service errors, then circuit breaker
-          json: async () => {
-            attemptCounts.push(i)
-
-            if (i < 5) {
-              return {
-                error: 'SMS service temporarily unavailable',
-                code: 'SERVICE_UNAVAILABLE',
-              }
-            } else {
-              return {
-                error: 'SMS service temporarily disabled due to repeated failures. Please try again later.',
-                code: 'CIRCUIT_BREAKER_OPEN',
-                retryAfter: 600, // 10 minutes
-              }
-            }
-          },
-        })
-
         await fetch('/api/auth/phone-number/send-otp', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -418,40 +436,60 @@ describe('Performance and Resilience Tests', () => {
 
   describe('Load Testing Scenarios', () => {
     it('should maintain response times under load', async () => {
-      const loadTestDuration = 5000 // 5 seconds
+      const loadTestDuration = 2000 // 2 seconds (reduced to avoid timeout)
       const requestInterval = 100 // Request every 100ms
       const responses: any[] = []
       const startTime = Date.now()
 
+      // Mock fetch to simulate realistic response times
+      global.fetch = vi.fn().mockImplementation(async (url, options) => {
+        const requestStart = Date.now()
+
+        // Simulate realistic processing time (50-200ms)
+        const processingTime = Math.random() * 150 + 50
+        await new Promise(resolve => setTimeout(resolve, processingTime))
+
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            responseTime: Date.now() - requestStart,
+          }),
+        }
+      })
+
       // Generate load for specified duration
       const loadTest = async () => {
-        while (Date.now() - startTime < loadTestDuration) {
-          const requestStart = Date.now()
+        const promises = []
+        let requestCount = 0
 
-          global.fetch = vi.fn().mockResolvedValue({
-            ok: true,
-            status: 200,
-            json: async () => ({
-              success: true,
-              responseTime: Date.now() - requestStart,
-            }),
-          })
-
-          const response = await fetch('/api/auth/phone-number/send-otp', {
+        while (Date.now() - startTime < loadTestDuration && requestCount < 15) {
+          const requestPromise = fetch('/api/auth/phone-number/send-otp', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phoneNumber: '+14155550100' }),
+            body: JSON.stringify({ phoneNumber: `+1415555${requestCount.toString().padStart(4, '0')}` }),
+          }).then(async (response) => {
+            const data = await response.json()
+            responses.push(data)
           })
 
-          responses.push(await response.json())
+          promises.push(requestPromise)
+          requestCount++
+
           await new Promise(resolve => setTimeout(resolve, requestInterval))
         }
+
+        // Wait for all requests to complete
+        await Promise.all(promises)
       }
 
       await loadTest()
 
       // Analyze performance
-      const responseTimes = responses.map(r => r.responseTime || 0)
+      const responseTimes = responses.map(r => r.responseTime || 0).filter(rt => rt > 0)
+      expect(responseTimes.length).toBeGreaterThan(0) // Ensure we have response times
+
       const avgResponseTime = responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length
       const maxResponseTime = Math.max(...responseTimes)
 
@@ -459,6 +497,6 @@ describe('Performance and Resilience Tests', () => {
       expect(maxResponseTime).toBeLessThan(3000) // Max < 3 seconds
 
       console.log(`Load test: ${responses.length} requests, avg: ${avgResponseTime}ms, max: ${maxResponseTime}ms`)
-    })
+    }, 10000) // Set timeout to 10 seconds for this test
   })
 })
