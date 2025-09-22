@@ -1,12 +1,20 @@
-import { drizzle } from 'drizzle-orm/libsql';
-import { createClient } from '@libsql/client';
-import * as schema from '@/db/schema';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
+import * as schema from './schema';
 
-const client = createClient({
-  url: process.env.TURSO_CONNECTION_URL!,
-  authToken: process.env.TURSO_AUTH_TOKEN!,
+if (!process.env.DATABASE_URL) {
+  throw new Error('DATABASE_URL is not set');
+}
+
+const connectionString = process.env.DATABASE_URL;
+
+// Create the postgres client
+const client = postgres(connectionString, {
+  prepare: false, // This can help with some connection issues
 });
 
-export const db = drizzle(client, { schema });
-
-export type Database = typeof db;
+// Create the drizzle instance
+export const db = drizzle(client, { 
+  schema,
+  logger: process.env.NODE_ENV === 'development' // Add logging in dev
+});
