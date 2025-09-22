@@ -4,14 +4,14 @@ import { messages, spaceMembers, users } from '@/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 
 // Helper function to extract userId from auth (placeholder)
-function getUserIdFromRequest(request: NextRequest): number {
+function getUserIdFromRequest(request: NextRequest): string {
   const userId = request.headers.get('x-user-id');
   if (!userId) throw new Error('Authentication required');
-  return parseInt(userId);
+  return userId;
 }
 
 // Helper function to check space membership
-async function checkSpaceMembership(userId: number, spaceId: number): Promise<boolean> {
+async function checkSpaceMembership(userId: string, spaceId: number): Promise<boolean> {
   const membership = await db
     .select()
     .from(spaceMembers)
@@ -44,7 +44,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Check if user has access to this space
-    const hasAccess = await checkSpaceMembership(userId, parseInt(spaceId));
+    const spaceIdNum = parseInt(spaceId);
+    const hasAccess = await checkSpaceMembership(userId, spaceIdNum);
     if (!hasAccess) {
       return NextResponse.json({ 
         error: "Access denied. You are not a member of this space.", 
@@ -67,7 +68,7 @@ export async function GET(request: NextRequest) {
       })
       .from(messages)
       .innerJoin(users, eq(messages.userId, users.id))
-      .where(eq(messages.spaceId, parseInt(spaceId)))
+      .where(eq(messages.spaceId, spaceIdNum))
       .orderBy(desc(messages.createdAt))
       .limit(limit)
       .offset(offset);
@@ -104,15 +105,16 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    if (isNaN(parseInt(spaceId))) {
-      return NextResponse.json({ 
-        error: "Invalid space ID", 
-        code: "INVALID_SPACE_ID" 
+    const spaceIdNum = parseInt(spaceId);
+    if (isNaN(spaceIdNum)) {
+      return NextResponse.json({
+        error: "Invalid space ID",
+        code: "INVALID_SPACE_ID"
       }, { status: 400 });
     }
 
     // Check if user is member of the space
-    const hasAccess = await checkSpaceMembership(userId, parseInt(spaceId));
+    const hasAccess = await checkSpaceMembership(userId, spaceIdNum);
     if (!hasAccess) {
       return NextResponse.json({ 
         error: "Access denied. You are not a member of this space.", 
@@ -136,7 +138,7 @@ export async function POST(request: NextRequest) {
 
     // Create message
     const newMessage = await db.insert(messages).values({
-      spaceId: parseInt(spaceId),
+      spaceId: spaceIdNum,
       userId: userId,
       content: content.trim(),
       attachments: attachmentsJson,

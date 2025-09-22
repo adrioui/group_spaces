@@ -4,14 +4,14 @@ import { notes, spaceMembers, users, notifications } from '@/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 
 // Helper function to extract userId from auth (placeholder)
-function getUserIdFromRequest(request: NextRequest): number {
+function getUserIdFromRequest(request: NextRequest): string {
   const userId = request.headers.get('x-user-id');
   if (!userId) throw new Error('Authentication required');
-  return parseInt(userId);
+  return userId;
 }
 
 // Helper function to check space membership
-async function checkSpaceMembership(userId: number, spaceId: number): Promise<{ isMember: boolean; role?: string }> {
+async function checkSpaceMembership(userId: string, spaceId: number): Promise<{ isMember: boolean; role?: string }> {
   const membership = await db
     .select({ role: spaceMembers.role })
     .from(spaceMembers)
@@ -42,10 +42,11 @@ export async function GET(request: NextRequest) {
 
     // Single note by ID
     if (noteId) {
-      if (isNaN(parseInt(noteId))) {
-        return NextResponse.json({ 
-          error: "Invalid note ID", 
-          code: "INVALID_NOTE_ID" 
+      const noteIdNum = parseInt(noteId);
+      if (isNaN(noteIdNum)) {
+        return NextResponse.json({
+          error: "Invalid note ID",
+          code: "INVALID_NOTE_ID"
         }, { status: 400 });
       }
 
@@ -66,7 +67,7 @@ export async function GET(request: NextRequest) {
         })
         .from(notes)
         .innerJoin(users, eq(notes.authorId, users.id))
-        .where(eq(notes.id, parseInt(noteId)))
+        .where(eq(notes.id, noteIdNum))
         .limit(1);
 
       if (noteWithDetails.length === 0) {
@@ -87,10 +88,11 @@ export async function GET(request: NextRequest) {
       // Get assignee details if assigned
       let assigneeDetails = null;
       if (note.assignedTo) {
+        const assigneeIdNum = parseInt(note.assignedTo);
         const assignee = await db
           .select({ id: users.id, name: users.name, email: users.email })
           .from(users)
-          .where(eq(users.id, note.assignedTo))
+          .where(eq(users.id, assigneeIdNum))
           .limit(1);
         assigneeDetails = assignee[0] || null;
       }
@@ -108,14 +110,16 @@ export async function GET(request: NextRequest) {
 
     // List notes by space
     if (!spaceId || isNaN(parseInt(spaceId))) {
-      return NextResponse.json({ 
-        error: "Valid space ID is required", 
-        code: "MISSING_SPACE_ID" 
+      return NextResponse.json({
+        error: "Valid space ID is required",
+        code: "MISSING_SPACE_ID"
       }, { status: 400 });
     }
 
+    const spaceIdNum = parseInt(spaceId);
+
     // Check if user has access to this space
-    const { isMember } = await checkSpaceMembership(userId, parseInt(spaceId));
+    const { isMember } = await checkSpaceMembership(userId, spaceIdNum);
     if (!isMember) {
       return NextResponse.json({ 
         error: "Access denied", 
@@ -124,11 +128,16 @@ export async function GET(request: NextRequest) {
     }
 
     // Build query conditions
-    let conditions = [eq(notes.spaceId, parseInt(spaceId))];
-    
+    let conditions = [eq(notes.spaceId, spaceIdNum)];
+
     if (status) conditions.push(eq(notes.status, status));
-    if (assignedTo) conditions.push(eq(notes.assignedTo, parseInt(assignedTo)));
-    if (authorId) conditions.push(eq(notes.authorId, parseInt(authorId)));
+    if (assignedTo) {
+      const assignedToNum = parseInt(assignedTo);
+      if (!isNaN(assignedToNum)) {
+        conditions.push(eq(notes.assignedTo, assignedToNum));
+      }
+    }
+    if (authorId) conditions.push(eq(notes.authorId, authorId));
 
     const notesList = await db
       .select({
@@ -171,14 +180,16 @@ export async function POST(request: NextRequest) {
     }
 
     if (isNaN(parseInt(spaceId))) {
-      return NextResponse.json({ 
-        error: "Invalid space ID", 
-        code: "INVALID_SPACE_ID" 
+      return NextResponse.json({
+        error: "Invalid space ID",
+        code: "INVALID_SPACE_ID"
       }, { status: 400 });
     }
 
+    const spaceIdNum = parseInt(spaceId);
+
     // Check if user is member of the space
-    const { isMember } = await checkSpaceMembership(userId, parseInt(spaceId));
+    const { isMember } = await checkSpaceMembership(userId, spaceIdNum);
     if (!isMember) {
       return NextResponse.json({ 
         error: "Access denied", 
@@ -190,11 +201,11 @@ export async function POST(request: NextRequest) {
     const publishedAt = status === 'published' ? now : null;
 
     const newNote = await db.insert(notes).values({
-      spaceId: parseInt(spaceId),
+      spaceId: spaceIdNum,
       authorId: userId,
       title: title.trim(),
       status: status,
-      assignedTo: assignedTo ? parseInt(assignedTo) : null,
+      assignedTo: assignedTo || null,
       dueAt: dueAt || null,
       publishedAt,
       createdAt: now,
@@ -216,17 +227,19 @@ export async function PUT(request: NextRequest) {
     const noteId = searchParams.get('id');
 
     if (!noteId || isNaN(parseInt(noteId))) {
-      return NextResponse.json({ 
-        error: "Valid note ID is required", 
-        code: "INVALID_NOTE_ID" 
+      return NextResponse.json({
+        error: "Valid note ID is required",
+        code: "INVALID_NOTE_ID"
       }, { status: 400 });
     }
+
+    const noteIdNum = parseInt(noteId);
 
     // Get note details to check permissions
     const noteDetails = await db
       .select()
       .from(notes)
-      .where(eq(notes.id, parseInt(noteId)))
+      .where(eq(notes.id, noteIdNum))
       .limit(1);
 
     if (noteDetails.length === 0) {
@@ -269,13 +282,13 @@ export async function PUT(request: NextRequest) {
       }
     }
 
-    if (assignedTo !== undefined) updateData.assignedTo = assignedTo ? parseInt(assignedTo) : null;
+    if (assignedTo !== undefined) updateData.assignedTo = assignedTo || null;
     if (dueAt !== undefined) updateData.dueAt = dueAt || null;
 
     const updatedNote = await db
       .update(notes)
       .set(updateData)
-      .where(eq(notes.id, parseInt(noteId)))
+      .where(eq(notes.id, noteIdNum))
       .returning();
 
     // After successful update, if this action just published the note, create notifications for members
@@ -323,17 +336,19 @@ export async function DELETE(request: NextRequest) {
     const noteId = searchParams.get('id');
 
     if (!noteId || isNaN(parseInt(noteId))) {
-      return NextResponse.json({ 
-        error: "Valid note ID is required", 
-        code: "INVALID_NOTE_ID" 
+      return NextResponse.json({
+        error: "Valid note ID is required",
+        code: "INVALID_NOTE_ID"
       }, { status: 400 });
     }
+
+    const noteIdNum = parseInt(noteId);
 
     // Get note details to check permissions
     const noteDetails = await db
       .select()
       .from(notes)
-      .where(eq(notes.id, parseInt(noteId)))
+      .where(eq(notes.id, noteIdNum))
       .limit(1);
 
     if (noteDetails.length === 0) {
@@ -351,11 +366,11 @@ export async function DELETE(request: NextRequest) {
       }, { status: 403 });
     }
 
-    await db.delete(notes).where(eq(notes.id, parseInt(noteId)));
+    await db.delete(notes).where(eq(notes.id, noteIdNum));
 
-    return NextResponse.json({ 
+    return NextResponse.json({
       message: "Note deleted successfully",
-      deletedNoteId: parseInt(noteId)
+      deletedNoteId: noteIdNum
     });
   } catch (error) {
     console.error('DELETE notes error:', error);

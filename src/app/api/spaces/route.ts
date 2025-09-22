@@ -4,12 +4,12 @@ import { spaces, spaceMembers, users } from '@/db/schema';
 import { eq, like, or, and, desc, count } from 'drizzle-orm';
 
 // Helper function to extract userId from auth (placeholder)
-function getUserIdFromRequest(request: NextRequest): number {
+function getUserIdFromRequest(request: NextRequest): string {
   // In real implementation, extract from auth session/JWT
   // For demo purposes, using header
   const userId = request.headers.get('x-user-id');
   if (!userId) throw new Error('Authentication required');
-  return parseInt(userId);
+  return userId;
 }
 
 // GET - List spaces by user membership
@@ -130,11 +130,13 @@ export async function PUT(request: NextRequest) {
     const spaceId = searchParams.get('id');
 
     if (!spaceId || isNaN(parseInt(spaceId))) {
-      return NextResponse.json({ 
-        error: "Valid space ID is required", 
-        code: "INVALID_SPACE_ID" 
+      return NextResponse.json({
+        error: "Valid space ID is required",
+        code: "INVALID_SPACE_ID"
       }, { status: 400 });
     }
+
+    const spaceIdNum = parseInt(spaceId);
 
     // Check user permissions (admin or owner)
     const membership = await db
@@ -142,7 +144,7 @@ export async function PUT(request: NextRequest) {
       .from(spaceMembers)
       .where(
         and(
-          eq(spaceMembers.spaceId, parseInt(spaceId)),
+          eq(spaceMembers.spaceId, spaceIdNum),
           eq(spaceMembers.userId, userId),
           eq(spaceMembers.status, 'active')
         )
@@ -180,7 +182,7 @@ export async function PUT(request: NextRequest) {
     const updatedSpace = await db
       .update(spaces)
       .set(updateData)
-      .where(eq(spaces.id, parseInt(spaceId)))
+      .where(eq(spaces.id, spaceIdNum))
       .returning();
 
     if (updatedSpace.length === 0) {

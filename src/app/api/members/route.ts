@@ -4,14 +4,14 @@ import { spaceMembers, users, spaces } from '@/db/schema';
 import { eq, and, asc } from 'drizzle-orm';
 
 // Helper function to extract userId from auth (placeholder)
-function getUserIdFromRequest(request: NextRequest): number {
+function getUserIdFromRequest(request: NextRequest): string {
   const userId = request.headers.get('x-user-id');
   if (!userId) throw new Error('Authentication required');
-  return parseInt(userId);
+  return userId;
 }
 
 // Helper function to check space membership and role
-async function checkSpaceMembership(userId: number, spaceId: number): Promise<{ isMember: boolean; role?: string }> {
+async function checkSpaceMembership(userId: string, spaceId: number): Promise<{ isMember: boolean; role?: string }> {
   const membership = await db
     .select({ role: spaceMembers.role })
     .from(spaceMembers)
@@ -35,14 +35,16 @@ export async function GET(request: NextRequest) {
     const spaceId = searchParams.get('spaceId');
 
     if (!spaceId || isNaN(parseInt(spaceId))) {
-      return NextResponse.json({ 
-        error: "Valid space ID is required", 
-        code: "MISSING_SPACE_ID" 
+      return NextResponse.json({
+        error: "Valid space ID is required",
+        code: "MISSING_SPACE_ID"
       }, { status: 400 });
     }
 
+    const spaceIdNum = parseInt(spaceId);
+
     // Check if user has access to this space
-    const { isMember } = await checkSpaceMembership(userId, parseInt(spaceId));
+    const { isMember } = await checkSpaceMembership(userId, spaceIdNum);
     if (!isMember) {
       return NextResponse.json({ 
         error: "Access denied", 
@@ -64,7 +66,7 @@ export async function GET(request: NextRequest) {
       })
       .from(spaceMembers)
       .innerJoin(users, eq(spaceMembers.userId, users.id))
-      .where(eq(spaceMembers.spaceId, parseInt(spaceId)))
+      .where(eq(spaceMembers.spaceId, spaceIdNum))
       .orderBy(
         // Order by role priority (owner first, then admin, then member)
         asc(
@@ -101,21 +103,23 @@ export async function POST(request: NextRequest) {
     }
 
     if (isNaN(parseInt(spaceId))) {
-      return NextResponse.json({ 
-        error: "Invalid space ID", 
-        code: "INVALID_SPACE_ID" 
+      return NextResponse.json({
+        error: "Invalid space ID",
+        code: "INVALID_SPACE_ID"
       }, { status: 400 });
     }
 
+    const spaceIdNum = parseInt(spaceId);
+
     if (!['member', 'admin'].includes(role)) {
-      return NextResponse.json({ 
-        error: "Role must be 'member' or 'admin'", 
-        code: "INVALID_ROLE" 
+      return NextResponse.json({
+        error: "Role must be 'member' or 'admin'",
+        code: "INVALID_ROLE"
       }, { status: 400 });
     }
 
     // Check if user has admin/owner permissions
-    const { isMember, role: userRole } = await checkSpaceMembership(userId, parseInt(spaceId));
+    const { isMember, role: userRole } = await checkSpaceMembership(userId, spaceIdNum);
     if (!isMember || !['admin', 'owner'].includes(userRole!)) {
       return NextResponse.json({ 
         error: "Permission denied. Only admins and owners can invite users.", 
@@ -145,7 +149,7 @@ export async function POST(request: NextRequest) {
       .from(spaceMembers)
       .where(
         and(
-          eq(spaceMembers.spaceId, parseInt(spaceId)),
+          eq(spaceMembers.spaceId, spaceIdNum),
           eq(spaceMembers.userId, inviteeId)
         )
       )
@@ -162,7 +166,7 @@ export async function POST(request: NextRequest) {
 
     // Create invitation
     const invitation = await db.insert(spaceMembers).values({
-      spaceId: parseInt(spaceId),
+      spaceId: spaceIdNum,
       userId: inviteeId,
       role: role,
       status: 'invited',
@@ -196,11 +200,13 @@ export async function PUT(request: NextRequest) {
       const { spaceId } = await request.json();
 
       if (!spaceId || isNaN(parseInt(spaceId))) {
-        return NextResponse.json({ 
-          error: "Valid space ID is required", 
-          code: "INVALID_SPACE_ID" 
+        return NextResponse.json({
+          error: "Valid space ID is required",
+          code: "INVALID_SPACE_ID"
         }, { status: 400 });
       }
+
+      const spaceIdNum = parseInt(spaceId);
 
       // Find user's invitation
       const invitation = await db
@@ -208,7 +214,7 @@ export async function PUT(request: NextRequest) {
         .from(spaceMembers)
         .where(
           and(
-            eq(spaceMembers.spaceId, parseInt(spaceId)),
+            eq(spaceMembers.spaceId, spaceIdNum),
             eq(spaceMembers.userId, userId),
             eq(spaceMembers.status, 'invited')
           )
@@ -231,7 +237,7 @@ export async function PUT(request: NextRequest) {
         })
         .where(
           and(
-            eq(spaceMembers.spaceId, parseInt(spaceId)),
+            eq(spaceMembers.spaceId, spaceIdNum),
             eq(spaceMembers.userId, userId)
           )
         )
@@ -253,14 +259,16 @@ export async function PUT(request: NextRequest) {
       }
 
       if (!['member', 'admin'].includes(newRole)) {
-        return NextResponse.json({ 
-          error: "Role must be 'member' or 'admin'", 
-          code: "INVALID_ROLE" 
+        return NextResponse.json({
+          error: "Role must be 'member' or 'admin'",
+          code: "INVALID_ROLE"
         }, { status: 400 });
       }
 
+      const spaceIdNum = parseInt(spaceId);
+
       // Check if user has owner permissions
-      const { isMember, role: userRole } = await checkSpaceMembership(userId, parseInt(spaceId));
+      const { isMember, role: userRole } = await checkSpaceMembership(userId, spaceIdNum);
       if (!isMember || userRole !== 'owner') {
         return NextResponse.json({ 
           error: "Permission denied. Only space owners can change member roles.", 
@@ -274,8 +282,8 @@ export async function PUT(request: NextRequest) {
         .from(spaceMembers)
         .where(
           and(
-            eq(spaceMembers.spaceId, parseInt(spaceId)),
-            eq(spaceMembers.userId, parseInt(targetUserId))
+            eq(spaceMembers.spaceId, spaceIdNum),
+            eq(spaceMembers.userId, targetUserId)
           )
         )
         .limit(1);
@@ -303,8 +311,8 @@ export async function PUT(request: NextRequest) {
         })
         .where(
           and(
-            eq(spaceMembers.spaceId, parseInt(spaceId)),
-            eq(spaceMembers.userId, parseInt(targetUserId))
+            eq(spaceMembers.spaceId, spaceIdNum),
+            eq(spaceMembers.userId, targetUserId)
           )
         )
         .returning();
@@ -329,21 +337,23 @@ export async function DELETE(request: NextRequest) {
     const targetUserId = searchParams.get('userId');
 
     if (!spaceId || !targetUserId) {
-      return NextResponse.json({ 
-        error: "Space ID and user ID are required", 
-        code: "MISSING_PARAMETERS" 
+      return NextResponse.json({
+        error: "Space ID and user ID are required",
+        code: "MISSING_PARAMETERS"
       }, { status: 400 });
     }
 
-    if (isNaN(parseInt(spaceId)) || isNaN(parseInt(targetUserId))) {
-      return NextResponse.json({ 
-        error: "Invalid space ID or user ID", 
-        code: "INVALID_PARAMETERS" 
+    if (isNaN(parseInt(spaceId))) {
+      return NextResponse.json({
+        error: "Invalid space ID",
+        code: "INVALID_PARAMETERS"
       }, { status: 400 });
     }
+
+    const spaceIdNum = parseInt(spaceId);
 
     // Check if user has admin/owner permissions
-    const { isMember, role: userRole } = await checkSpaceMembership(userId, parseInt(spaceId));
+    const { isMember, role: userRole } = await checkSpaceMembership(userId, spaceIdNum);
     if (!isMember || !['admin', 'owner'].includes(userRole!)) {
       return NextResponse.json({ 
         error: "Permission denied", 
@@ -357,8 +367,8 @@ export async function DELETE(request: NextRequest) {
       .from(spaceMembers)
       .where(
         and(
-          eq(spaceMembers.spaceId, parseInt(spaceId)),
-          eq(spaceMembers.userId, parseInt(targetUserId))
+          eq(spaceMembers.spaceId, spaceIdNum),
+          eq(spaceMembers.userId, targetUserId)
         )
       )
       .limit(1);
@@ -387,14 +397,14 @@ export async function DELETE(request: NextRequest) {
       })
       .where(
         and(
-          eq(spaceMembers.spaceId, parseInt(spaceId)),
-          eq(spaceMembers.userId, parseInt(targetUserId))
+          eq(spaceMembers.spaceId, spaceIdNum),
+          eq(spaceMembers.userId, targetUserId)
         )
       );
 
     return NextResponse.json({
       message: "Member removed from space successfully",
-      removedUserId: parseInt(targetUserId)
+      removedUserId: targetUserId
     });
   } catch (error) {
     console.error('DELETE members error:', error);
