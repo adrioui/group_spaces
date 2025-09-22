@@ -26,7 +26,10 @@
     "test:e2e": "env $(cat .env.test | xargs) playwright test",
     "test:e2e:ui": "env $(cat .env.test | xargs) playwright test --ui",
     "test:e2e:headed": "env $(cat .env.test | xargs) playwright test --headed",
-    "test:all": "npm run test && npm run test:e2e"
+    "test:all": "npm run test && npm run test:e2e",
+    "test:pglite": "TEST_DB=pglite vitest",
+    "test:pglite:watch": "TEST_DB=pglite vitest --watch",
+    "test:e2e:pglite": "TEST_DB=pglite playwright test --global-setup=playwright.pglite.global-setup.ts"
   },
   "type": "module",
   "dependencies": {
@@ -128,6 +131,7 @@
     "zod": "^4.1.8"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.3.8",
     "@eslint/eslintrc": "^3.3.1",
     "@playwright/test": "^1.55.0",
     "@tailwindcss/postcss": "^4",
