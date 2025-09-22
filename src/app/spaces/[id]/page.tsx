@@ -11,7 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import Link from "next/link";
+import { useRealtime } from "@/hooks/useRealtime";
+import { type RealtimeEvent } from "@/lib/realtime";
 
 function useAppUserId() {
   const { data: session } = useSession();
@@ -164,9 +165,13 @@ function ChatPanel({ spaceId, userId, bearer }: { spaceId: number; userId: numbe
 
   useEffect(() => {
     load();
-    const id = setInterval(load, 5000); // lightweight realtime via polling
-    return () => clearInterval(id);
   }, [load]);
+
+  useRealtime(spaceId, (event: RealtimeEvent) => {
+    if (event.type === 'message:new') {
+      setMessages(prev => [event.payload, ...prev]);
+    }
+  }, [spaceId]);
 
   const send = async () => {
     if (!content.trim()) return;
@@ -282,6 +287,22 @@ function NotesPanel({ spaceId, userId, bearer }: { spaceId: number; userId: numb
   useEffect(() => {
     load();
   }, []);
+
+  useRealtime(spaceId, (event: RealtimeEvent) => {
+    if (event.type === 'note:created' || event.type === 'note:updated') {
+      setNotes(prev => {
+        const existingIndex = prev.findIndex(n => n.id === event.payload.id);
+        if (existingIndex >= 0) {
+          const updated = [...prev];
+          updated[existingIndex] = event.payload;
+          return updated;
+        }
+        return [event.payload, ...prev];
+      });
+    } else if (event.type === 'note:deleted') {
+      setNotes(prev => prev.filter(n => n.id !== event.payload.id));
+    }
+  }, [spaceId]);
 
   const save = async () => {
     if (!title.trim()) return;
@@ -454,6 +475,12 @@ function MembersPanel({ spaceId, userId, bearer }: { spaceId: number; userId: nu
   useEffect(() => {
     load();
   }, []);
+
+  useRealtime(spaceId, (event: RealtimeEvent) => {
+    if (event.type === 'member:joined' || event.type === 'member:left') {
+      load();
+    }
+  }, [spaceId, load]);
 
   const invite = async () => {
     setError(null);
